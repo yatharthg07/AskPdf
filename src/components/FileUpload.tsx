@@ -9,8 +9,8 @@ import { useMutation } from '@tanstack/react-query';
 import axios from 'axios';
 import { toast } from "react-hot-toast";
 const FileUpload = () => {
-
-  const { mutate, isLoading } = useMutation({
+  const [uploading, setUploading] = React.useState(false);
+  const { mutate, isPending } = useMutation({
     mutationFn: async ({
       file_key,
       file_name,
@@ -37,6 +37,7 @@ const FileUpload = () => {
         return;
       } 
       try{  
+        setUploading(true);
         const data = await uploadToS3(file);
         console.log(data);
         if (!data?.file_key || !data.file_name) {
@@ -44,9 +45,9 @@ const FileUpload = () => {
           return;
         }
         mutate(data, {
-          onSuccess: ({ chat_id }) => {
-            toast.success("Chat created!");
-            // router.push(`/chat/${chat_id}`);
+          onSuccess: (data) => {
+          console.log(data);
+          toast.success("Chat created successfully");
           },
           onError: (err) => {
             toast.error("Error creating chat");
@@ -59,6 +60,9 @@ const FileUpload = () => {
       {
         console.log(e);
       }
+     finally {
+      setUploading(false);
+    }
 
     }
   });
@@ -72,11 +76,20 @@ const FileUpload = () => {
         })}
       >
         <input {...getInputProps()} />
-
+        {uploading || isPending ? (
+          <>
+            {/* loading state */}
+            <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
+            <p className="mt-2 text-sm text-slate-400">
+              Spilling Tea to GPT...
+            </p>
+          </>
+        ) : (
           <>
             <Inbox className="w-10 h-10 text-blue-500" />
             <p className="mt-2 text-sm text-slate-400">Drop PDF Here</p>
           </>
+        )}
       </div>
     </div>
   );
