@@ -1,14 +1,18 @@
-import { openai } from '@ai-sdk/openai';
-import { streamText, convertToCoreMessages } from 'ai';
+import { Configuration, OpenAIApi } from "openai-edge";
+import { Message, OpenAIStream, StreamingTextResponse } from "ai";
+import { getContext } from "@/lib/context";
 import { db } from "@/lib/db";
 import { chats, messages as _messages } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { NextResponse, NextRequest } from "next/server";
-import { getContext } from '@/lib/context';
-import{Message } from 'ai';
-// Configure OpenAI API
+import { NextResponse } from "next/server";
 
-export async function POST(req: NextRequest) {
+
+const config = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(config);
+
+export async function POST(req: Request) {
   try {
     const { messages, chatId } = await req.json();
     const _chats = await db.select().from(chats).where(eq(chats.id, chatId));
@@ -17,10 +21,9 @@ export async function POST(req: NextRequest) {
     }
     const fileKey = _chats[0].fileKey;
     const lastMessage = messages[messages.length - 1];
-    console.log('lastMessage', lastMessage);
-    console.log(fileKey);
     const context = await getContext(lastMessage.content, fileKey);
-    console.log('context', context);
+    console.log("context", context);
+
     const prompt = {
       role: "system",
       content: `AI assistant is a brand new, powerful, human-like artificial intelligence.
@@ -39,16 +42,32 @@ export async function POST(req: NextRequest) {
       `,
     };
 
-    const result = await streamText({
-      model: openai('gpt-4-turbo'),
+    const response = await openai.createChatCompletion({
+      model: "gpt-4-turbo",
       messages: [
         prompt,
         ...messages.filter((message: Message) => message.role === "user"),
       ],
+      stream: true,
     });
-    return result.toDataStreamResponse();
-  } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-  }
+    const stream = OpenAIStream(response, {
+      onStart: async () => {
+        // save user message into db
+        await db.insert(_messages).values({
+          chatId,
+          content: lastMessage.content,
+          role: "user",
+        });
+      },
+      onCompletion: async (completion) => {
+        // save ai message into db
+        await db.insert(_messages).values({
+          chatId,
+          content: completion,
+          role: "system",
+        });
+      },
+    });
+    return new StreamingTextResponse(stream);
+  } catch (error) {}
 }
